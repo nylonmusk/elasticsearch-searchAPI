@@ -1,4 +1,4 @@
-package constant;
+package com.example.searchAPI.constant;
 
 public enum Period {
     ALL("all"),

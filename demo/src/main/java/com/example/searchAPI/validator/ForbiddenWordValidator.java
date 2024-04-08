@@ -1,8 +1,8 @@
-package validator;
+package com.example.searchAPI.validator;
 
+import com.example.searchAPI.view.Log;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import view.Log;
 
 import java.io.File;
 import java.io.IOException;
@@ -11,6 +11,8 @@ import java.util.List;
 
 public class ForbiddenWordValidator {
     private final List<String> configData;
+
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ForbiddenWordValidator(String filePath) {
@@ -31,6 +33,11 @@ public class ForbiddenWordValidator {
     }
 
     public boolean isForbiddenWord(String searchWord) {
-        return configData.contains(searchWord);
+        for (String forbiddenWord : configData) {
+            if (searchWord.contains(forbiddenWord)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
