@@ -9,10 +9,7 @@ import com.example.searchAPI.validator.ForbiddenWordValidator;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.RequestOptions;
-import org.elasticsearch.index.query.BoolQueryBuilder;
-import org.elasticsearch.index.query.QueryBuilder;
-import org.elasticsearch.index.query.QueryBuilders;
-import org.elasticsearch.index.query.RangeQueryBuilder;
+import org.elasticsearch.index.query.*;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.search.fetch.subphase.highlight.HighlightBuilder;
 import org.elasticsearch.search.sort.SortBuilders;
@@ -21,7 +18,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import java.util.Arrays;
 import java.util.List;
 
 @RestController
@@ -112,13 +108,17 @@ public class ElasticsearchController {
                         .format("yyyy.MM.dd")
                         .from(startDate.format(DateTimeFormatter.ISO_LOCAL_DATE))
                         .to(endDate.format(DateTimeFormatter.ISO_LOCAL_DATE));
-                sourceBuilder.query(rangeQueryBuilder);
+
+                // 기존의 필터된 쿼리에 조회 기간 필터를 추가
+                boolQueryBuilder.filter(rangeQueryBuilder);
             }
 
+            // 쿼리 빌더 설정
+            sourceBuilder.query(boolQueryBuilder);
             System.out.println(sourceBuilder.toString());
 
             // 최대 문서수, 현재 페이지
-            sourceBuilder.from((nowPage - 1) * maxDocument);
+            sourceBuilder.from(nowPage);
             sourceBuilder.size(maxDocument);
 
             // 정확도순, 날짜순(최신순, 오래된순) 정렬
@@ -130,28 +130,37 @@ public class ElasticsearchController {
             } else if (sortOption.equals(Sort.EARLIEST.get())) {
                 sourceBuilder.sort(SortBuilders.fieldSort("writeDate").order(SortOrder.ASC));
             }
+            System.out.println(sourceBuilder.toString());
             System.out.println(nowPage);
             System.out.println(maxDocument);
-            // 필드 지정 및 하이라이팅 설정
-            for (String field : fieldDesignation) {
-                // Match Phrase Query를 사용하여 정확한 일치 검색
-                sourceBuilder.query(QueryBuilders.matchPhraseQuery(field, keyword));
 
-                // 해당 필드에서만 하이라이팅 설정
-                HighlightBuilder highlightBuilder = new HighlightBuilder();
-                highlightBuilder.field(field);
-                highlightBuilder.requireFieldMatch(false);
-                highlightBuilder.preTags("<strong>");
-                highlightBuilder.postTags("</strong>");
-                sourceBuilder.highlighter(highlightBuilder);
+
+            // 필드 지정 및 하이라이팅 설정
+            // 전체 문서에 대한 하이라이팅 설정
+            HighlightBuilder highlightBuilder = new HighlightBuilder();
+            highlightBuilder.requireFieldMatch(false);
+            highlightBuilder.preTags("<strong>");
+            highlightBuilder.postTags("</strong>");
+
+            sourceBuilder.highlighter(highlightBuilder);
+
+            for (String field : fieldDesignation) {
+                MatchPhraseQueryBuilder matchPhraseQueryBuilder = QueryBuilders.matchPhraseQuery(field, keyword);
+                sourceBuilder.query(matchPhraseQueryBuilder);
                 System.out.println(field);
             }
 
+            System.out.println("After highlighting: " + sourceBuilder.toString());
+            System.out.println(nowPage);
+            System.out.println(maxDocument);
+
+
             searchRequest.source(sourceBuilder);
+
             System.out.println(searchRequest.toString());
             // Execute search request
             SearchResponse searchResponse = elasticConfiguration.getElasticClient().search(searchRequest, RequestOptions.DEFAULT);
-            System.out.println(searchResponse);
+            System.out.println(searchResponse.toString());
             return searchRequest.toString();
             // Process search response as needed
 
