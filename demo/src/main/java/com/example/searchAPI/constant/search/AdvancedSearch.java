@@ -1,12 +1,12 @@
 package com.example.searchAPI.constant.search;
 
-public enum SpecificSearch {
+public enum AdvancedSearch {
     INCLUDE("+"),
     EXCLUDE("-"),
     EQUAL("\"");
     private String keyword;
 
-    SpecificSearch(String keyword) {
+    AdvancedSearch(String keyword) {
         this.keyword = keyword;
     }
 

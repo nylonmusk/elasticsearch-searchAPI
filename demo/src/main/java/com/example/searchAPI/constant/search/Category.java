@@ -1,7 +1,8 @@
 package com.example.searchAPI.constant.search;
 
 public enum Category {
-    CATEGORY("ctgry");
+    CATEGORY("ctgry"),
+    ALL("all");
 
     private String keyword;
 

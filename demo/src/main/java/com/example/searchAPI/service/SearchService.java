@@ -1,6 +1,7 @@
 package com.example.searchAPI.service;
 
 import com.example.searchAPI.config.ElasticConfiguration;
+import com.example.searchAPI.constant.search.AdvancedSearch;
 import com.example.searchAPI.constant.search.Category;
 import com.example.searchAPI.constant.search.Period;
 import com.example.searchAPI.constant.search.Sort;
@@ -16,6 +17,7 @@ import org.elasticsearch.index.query.functionscore.FunctionScoreQueryBuilder;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.SearchHits;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
+import org.elasticsearch.search.fetch.subphase.highlight.HighlightBuilder;
 import org.elasticsearch.search.fetch.subphase.highlight.HighlightField;
 import org.elasticsearch.search.sort.SortBuilders;
 import org.elasticsearch.search.sort.SortOrder;
@@ -25,10 +27,8 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class SearchService {
@@ -51,7 +51,6 @@ public class SearchService {
     @Value("${search.forbiddenPath}")
     private String forbiddenPath;
 
-
     @GetMapping("/")
     public List<String> search(SearchCriteria criteria) {
 
@@ -60,77 +59,77 @@ public class SearchService {
             SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
 
             String keyword = criteria.getKeyword();
-            System.out.println(keyword);
-            // 금칙어 처리 적용
+
             checkForbiddenWord(keyword);
-
-            // 고급(상세) 검색
-            // 필드 지정
             keyword = advancedSearchInSpecificFields(criteria.getFieldDesignation(), keyword, sourceBuilder);
-            System.out.println("--------------------------------------------");
-            System.out.println(sourceBuilder.toString());
-            System.out.println(searchRequest.toString());
-
-            // 정확도순, 날짜순(최신순, 오래된순) 정렬
-            sort(criteria.getSortOption(), sourceBuilder, searchRequest, criteria.getFieldDesignation(), keyword);
-//            sort(criteria.getSortOption(), sourceBuilder, criteria.getFieldDesignation(), keyword);
-            System.out.println("--------------------------------------------");
-            System.out.println(sourceBuilder.toString());
-            System.out.println(searchRequest.toString());
-
-            // 조회 기간 필터링
             setDateRange(criteria.getPeriod(), sourceBuilder);
-
-            System.out.println("--------------------------------------------");
-            System.out.println(sourceBuilder.toString());
-            System.out.println(searchRequest.toString());
-            // 최대 문서수, 현재 페이지
             setPage(criteria.getMaxDocument(), criteria.getNowPage(), sourceBuilder);
+            sort(criteria.getSortOption(), sourceBuilder, searchRequest, criteria.getFieldDesignation(), keyword);
+            setupHighlighting(sourceBuilder);
 
             System.out.println("--------------------------------------------");
             System.out.println(sourceBuilder.toString());
             System.out.println(searchRequest.toString());
-
-
+//            searchRequest.source(sourceBuilder);
+//            SearchResponse searchResponse = elasticConfiguration.getElasticClient().search(searchRequest, RequestOptions.DEFAULT);
+//            SearchHits hits = searchResponse.getHits();
+//
+//            List<String> results = new ArrayList<>();
+//            for (SearchHit hit : hits) {
+//                String result = hit.getSourceAsString(); // 원본 결과
+//                Map<String, HighlightField> highlightFields = hit.getHighlightFields();
+//
+//                // 모든 필드에 대한 하이라이팅 처리
+//                for (Map.Entry<String, HighlightField> entry : highlightFields.entrySet()) {
+//                    HighlightField field = entry.getValue();
+//                    if (field != null) {
+//                        Text[] fragments = field.fragments();
+//                        String highlightedText = Arrays.stream(fragments)
+//                                .map(Text::string)
+//                                .collect(Collectors.joining(" "));
+//                        // 원본 결과에 하이라이팅된 텍스트를 대체합니다.
+//                        result = result.replace(field.getName(), highlightedText);
+//                    }
+//                }
+//                results.add(result);
+//            }
+//
+//            return results;
             searchRequest.source(sourceBuilder);
             SearchResponse searchResponse = elasticConfiguration.getElasticClient().search(searchRequest, RequestOptions.DEFAULT);
             SearchHits hits = searchResponse.getHits();
 
-            Map<String, List<String>> categorizedResults = new HashMap<>();
+            List<String> results = new ArrayList<>();
+            for (SearchHit hit : hits.getHits()) {
+                Map<String, Object> sourceAsMap = hit.getSourceAsMap(); // 원본 문서를 Map 형태로 가져옵니다.
+                Map<String, HighlightField> highlightFields = hit.getHighlightFields(); // 하이라이트된 필드를 가져옵니다.
 
-            for (SearchHit hit : hits) {
-                String category = (String) hit.getSourceAsMap().get(Category.CATEGORY.get());
-                // 해당 카테고리의 최대 출력 건수를 가져옴
-                int index = criteria.getCategories().indexOf(category);
-                int maxCount = criteria.getCategoryMaxCounts().get(index >= 0 ? index : 0);
+                // 원본 문서의 모든 필드를 순회하며 하이라이트된 결과가 있으면 대체합니다.
+                Map<String, String> finalDocument = new LinkedHashMap<>();
+                for (Map.Entry<String, Object> entry : sourceAsMap.entrySet()) {
+                    String key = entry.getKey();
+                    Object value = entry.getValue();
 
-                List<String> resultsForCategory = categorizedResults.computeIfAbsent(category, k -> new ArrayList<>());
-
-                // 카테고리별 최대 출력 건수를 초과하지 않는 경우에만 결과를 추가
-                if (resultsForCategory.size() < maxCount) {
-                    Map<String, HighlightField> highlightFields = hit.getHighlightFields();
-                    StringBuilder fragmentString = new StringBuilder();
-
-                    // 하이라이트 처리
-                    for (String field : highlightFields.keySet()) {
-                        HighlightField highlight = highlightFields.get(field);
-                        Text[] fragments = highlight.fragments();
-                        for (Text fragment : fragments) {
-                            fragmentString.append(fragment.string());
-                        }
+                    // 하이라이트 처리된 필드인 경우 하이라이트된 텍스트로 대체
+                    if (highlightFields.containsKey(key) && highlightFields.get(key).fragments().length > 0) {
+                        Text[] fragments = highlightFields.get(key).fragments();
+                        String highlightedText = Arrays.stream(fragments)
+                                .map(Text::string)
+                                .collect(Collectors.joining(" "));
+                        finalDocument.put(key, highlightedText);
+                    } else {
+                        finalDocument.put(key, value.toString());
                     }
-                    // 원본 문서 정보와 하이라이트된 텍스트를 조합
-                    String result = hit.getSourceAsString() + "\nHighlight: " + fragmentString.toString();
-                    resultsForCategory.add(result);
                 }
+
+                // 최종 결과 문자열 구성
+                String result = finalDocument.entrySet().stream()
+                        .map(entry -> entry.getKey() + ": " + entry.getValue())
+                        .collect(Collectors.joining("\n"));
+                results.add(result);
             }
 
-            // 최종 결과를 하나의 리스트로 합치기
-            List<String> finalResults = new ArrayList<>();
-            categorizedResults.values().forEach(finalResults::addAll);
-
-            return finalResults;
-
+            return results;
         } catch (Exception e) {
             e.printStackTrace();
             return null;
@@ -144,20 +143,17 @@ public class SearchService {
 
     private void sort(String sortOption, SearchSourceBuilder sourceBuilder, SearchRequest searchRequest, List<String> fieldDesignation, String keyword) {
         if (sortOption.equals(Sort.ACCURACY.get())) {
-            // 기존에 구성된 쿼리를 가져옵니다.
             QueryBuilder existingQuery = sourceBuilder.query();
 
-            // 최소 점수가 1.0을 초과하는 문서만 가져오도록 minScore를 설정합니다.
-            // 기존 쿼리(existingQuery)가 FunctionScoreQuery 형태인지 확인하고, 그렇지 않다면 새로운 FunctionScoreQuery를 생성합니다.
             if (!(existingQuery instanceof FunctionScoreQueryBuilder)) {
                 FunctionScoreQueryBuilder functionScoreQueryBuilder = QueryBuilders.functionScoreQuery(
                         existingQuery,
-                        new FunctionScoreQueryBuilder.FilterFunctionBuilder[]{} // 필요한 경우 추가 점수 함수를 여기에 구성할 수 있습니다.
-                ).boostMode(CombineFunction.MULTIPLY); // 기본 점수와 function_score 쿼리의 결과에 따라 점수를 조정합니다.
+                        new FunctionScoreQueryBuilder.FilterFunctionBuilder[]{}
+                ).boostMode(CombineFunction.MULTIPLY);
                 sourceBuilder.query(functionScoreQueryBuilder);
             }
 
-            sourceBuilder.minScore(1.01f);
+            sourceBuilder.minScore(2.0f);
         } else if (sortOption.equals(Sort.LATEST.get())) {
             sourceBuilder.sort(SortBuilders.fieldSort(Sort.TARGET.get()).order(SortOrder.DESC));
         } else if (sortOption.equals(Sort.EARLIEST.get())) {
@@ -165,61 +161,6 @@ public class SearchService {
         }
         searchRequest.source(sourceBuilder);
     }
-
-
-
-//    private void sort(String sortOption, SearchSourceBuilder sourceBuilder, SearchRequest searchRequest, List<String> fieldDesignation, String keyword) {
-//        if (sortOption.equals(Sort.ACCURACY.get())) {
-//            BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
-//
-//            // 기존에 구성된 쿼리가 있으면 그 쿼리와 결합합니다.
-//            QueryBuilder existingQuery = sourceBuilder.query();
-//            if (existingQuery instanceof BoolQueryBuilder) {
-//                ((BoolQueryBuilder) existingQuery).should(boolQuery);
-//            } else if (existingQuery != null) {
-//                boolQuery.must(existingQuery);
-//            }
-//            // FunctionScoreQueryBuilder를 구성하고, boost_mode를 설정합니다.
-//            FunctionScoreQueryBuilder functionScoreQueryBuilder = QueryBuilders.functionScoreQuery(
-//                    boolQuery,
-//                    new FunctionScoreQueryBuilder.FilterFunctionBuilder[]{
-//                            // 여기에 필요한 경우 추가 점수 함수를 구성할 수 있습니다.
-//                    }
-//            ).boostMode(CombineFunction.MULTIPLY); // 기본 점수와 function_score 쿼리의 결과에 따라 점수를 조정합니다.
-//            sourceBuilder.query(functionScoreQueryBuilder);
-//        } else if (sortOption.equals(Sort.LATEST.get())) {
-//            sourceBuilder.sort(SortBuilders.fieldSort(Sort.TARGET.get()).order(SortOrder.DESC));
-//        } else if (sortOption.equals(Sort.EARLIEST.get())) {
-//            sourceBuilder.sort(SortBuilders.fieldSort(Sort.TARGET.get()).order(SortOrder.ASC));
-//        }
-//            searchRequest.source(sourceBuilder);
-//
-//    }
-
-
-//    private void sort(String sortOption, SearchSourceBuilder sourceBuilder, SearchRequest searchRequest, List<String> fieldDesignation, String keyword) {
-//        if (sortOption.equals(Sort.ACCURACY.get())) {
-//            // BoolQuery를 생성하고, fieldDesignation 리스트에 있는 모든 필드에 대해 matchQuery를 추가합니다.
-//            BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
-//            for (String field : fieldDesignation) {
-//                boolQuery.should(QueryBuilders.matchQuery(field, keyword));
-//            }
-//
-//            // function_score 쿼리 생성
-//            FunctionScoreQueryBuilder functionScoreQueryBuilder = QueryBuilders.functionScoreQuery(
-//                            boolQuery,
-//                            new FunctionScoreQueryBuilder.FilterFunctionBuilder[]{
-//                            })
-//                    .scoreMode(FunctionScoreQuery.ScoreMode.SUM) // 쿼리가 매치된 필드의 스코어 합산
-//                    .boostMode(CombineFunction.SUM); // 기본 스코어와 function_score 쿼리의 결과를 합산
-//            sourceBuilder.query(functionScoreQueryBuilder);
-//        } else if (sortOption.equals(Sort.LATEST.get())) {
-//            sourceBuilder.sort(SortBuilders.fieldSort(Sort.TARGET.get()).order(SortOrder.DESC));
-//        } else if (sortOption.equals(Sort.EARLIEST.get())) {
-//            sourceBuilder.sort(SortBuilders.fieldSort(Sort.TARGET.get()).order(SortOrder.ASC));
-//        }
-//        searchRequest.source(sourceBuilder);
-//    }
 
     private String advancedSearchInSpecificFields(List<String> fieldDesignation, String keyword, SearchSourceBuilder sourceBuilder) {
         BoolQueryBuilder boolQueryBuilder = QueryBuilders.boolQuery();
@@ -229,20 +170,16 @@ public class SearchService {
         boolQueryBuilder.must(QueryBuilders.matchAllQuery());
 
         for (String searchField : fieldDesignation) {
-            if (keyword.startsWith("+")) {
-                // +키워드: 해당 필드에 키워드가 포함된 문서만 검색
+            if (keyword.startsWith(AdvancedSearch.INCLUDE.get())) {
                 keywordWithoutOperator = keyword.substring(1);
                 boolQueryBuilder.must(QueryBuilders.matchQuery(searchField, keywordWithoutOperator)).boost(2.0f);
-            } else if (keyword.startsWith("-")) {
-                // -키워드: 해당 필드에 키워드가 포함되지 않은 문서만 검색
+            } else if (keyword.startsWith(AdvancedSearch.EXCLUDE.get())) {
                 keywordWithoutOperator = keyword.substring(1);
                 boolQueryBuilder.mustNot(QueryBuilders.matchQuery(searchField, keywordWithoutOperator)).boost(2.0f);
-            } else if (keyword.startsWith("\"") && keyword.endsWith("\"")) {
-                // ""키워드: 해당 필드에 키워드가 정확히 일치하는 문서만 검색
+            } else if (keyword.startsWith(AdvancedSearch.EQUAL.get()) && keyword.endsWith(AdvancedSearch.EQUAL.get())) {
                 keywordWithoutOperator = keyword.substring(1, keyword.length() - 1);
                 boolQueryBuilder.filter(QueryBuilders.matchPhraseQuery(searchField, keywordWithoutOperator)).boost(2.0f);
             } else {
-                // 기본 검색: 해당 필드에 키워드가 포함된 문서 검색
                 boolQueryBuilder.should(QueryBuilders.matchQuery(searchField, keyword)).boost(2.0f);
             }
             sourceBuilder.query(boolQueryBuilder);
@@ -287,11 +224,20 @@ public class SearchService {
         }
     }
 
-
     private void checkForbiddenWord(String keyword) {
         ForbiddenWordValidator forbiddenWordValidator = new ForbiddenWordValidator(forbiddenPath);
         if (forbiddenWordValidator.isForbiddenWord(keyword)) {
             throw new RuntimeException("금칙어가 포함되어 있습니다.");
         }
     }
+
+    private void setupHighlighting(SearchSourceBuilder sourceBuilder) {
+        HighlightBuilder highlightBuilder = new HighlightBuilder();
+        highlightBuilder.requireFieldMatch(false); // 필드 일치 요구사항을 비활성화합니다.
+        highlightBuilder.field("*") // 모든 필드를 대상으로 하이라이팅을 적용합니다.
+                .preTags("<b>")
+                .postTags("</b>");
+        sourceBuilder.highlighter(highlightBuilder);
+    }
+
 }
