@@ -1,10 +1,12 @@
 package com.example.searchAPI.model;
 
-import lombok.Data;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
 import java.util.List;
 
 
-@Data
+@Getter
+@AllArgsConstructor
 public class SearchCriteria {
     private final List<String> fieldDesignation;
     private final String period;
