@@ -5,7 +5,12 @@ public enum Period {
     DAY("day"),
     WEEK("week"),
     MONTH("month"),
-    YEAR("year");
+    YEAR("year"),
+
+    TARGET("writeDate"),
+    FORMAT("yyyy-MM-dd"),
+
+    DELIMETER("~");
 
     private String keyword;
 

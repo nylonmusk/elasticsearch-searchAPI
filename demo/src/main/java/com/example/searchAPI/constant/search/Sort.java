@@ -1,9 +1,11 @@
-package com.example.searchAPI.constant;
+package com.example.searchAPI.constant.search;
 
 public enum Sort {
     ACCURACY("accuracy"),
     LATEST("latest"),
-    EARLIEST("earliest");
+    EARLIEST("earliest"),
+
+    TARGET("writeDate");
 
     private String keyword;
 

@@ -32,9 +32,9 @@ public class ForbiddenWordValidator {
         return Collections.emptyList();
     }
 
-    public boolean isForbiddenWord(String searchWord) {
+    public boolean isForbiddenWord(String keyword) {
         for (String forbiddenWord : configData) {
-            if (searchWord.contains(forbiddenWord)) {
+            if (keyword.contains(forbiddenWord)) {
                 return true;
             }
         }

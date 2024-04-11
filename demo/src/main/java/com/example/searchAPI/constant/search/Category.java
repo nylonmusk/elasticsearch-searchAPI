@@ -1,7 +1,7 @@
 package com.example.searchAPI.constant.search;
 
 public enum Category {
-    CATEGORY("category");
+    CATEGORY("ctgry");
 
     private String keyword;
 
