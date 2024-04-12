@@ -21,9 +21,6 @@ import org.elasticsearch.index.query.*;
 import org.elasticsearch.index.query.functionscore.FunctionScoreQueryBuilder;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.SearchHits;
-import org.elasticsearch.search.aggregations.AggregationBuilders;
-import org.elasticsearch.search.aggregations.bucket.terms.TermsAggregationBuilder;
-import org.elasticsearch.search.aggregations.metrics.TopHitsAggregationBuilder;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.search.fetch.subphase.highlight.HighlightBuilder;
 import org.elasticsearch.search.fetch.subphase.highlight.HighlightField;
@@ -39,7 +36,6 @@ import java.text.SimpleDateFormat;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -262,52 +258,7 @@ public class SearchService {
         }
         sourceBuilder.query(boolQueryBuilder);
     }
-
-    private void setupAggregations(SearchSourceBuilder sourceBuilder, List<String> categories, List<Integer> categoryMaxCounts) {
-        if (!categories.contains(Category.ALL.get()) && !categories.isEmpty()) {
-            for (int i = 0; i < categories.size(); i++) {
-                TopHitsAggregationBuilder topHitsAgg = AggregationBuilders.topHits(categories.get(i)).size(categoryMaxCounts.get(i));
-                TermsAggregationBuilder termsAgg = AggregationBuilders.terms(categories.get(i)).field(Category.CATEGORY.get()).size(categoryMaxCounts.get(i));
-                termsAgg.subAggregation(topHitsAgg);
-                sourceBuilder.aggregation(termsAgg);
-                System.out.println(sourceBuilder);
-            }
-        }
-    }
-
-
-    private List<String> processSearchResults(SearchResponse searchResponse, String originalQuery) {
-        List<String> results = new ArrayList<>();
-        String[] queryParts = originalQuery.split("\\s+");
-
-        for (SearchHit hit : searchResponse.getHits()) {
-            String sourceString = hit.getSourceAsString(); // or use hit.getSourceAsMap() for more complex data structures
-
-            // Iterate through each part of the query
-            for (String part : queryParts) {
-                if (part.startsWith("+")) {
-                    // +포함 키워드: 포함되는 경우 하이라이트 처리
-                    String keyword = part.substring(1);
-                    sourceString = sourceString.replaceAll("(?i)(" + Pattern.quote(keyword) + ")", "<b>$1</b>");
-                } else if (part.startsWith("-")) {
-                    // -제외 키워드: 제외 처리는 여기서 하지 않고 검색 쿼리에서 처리
-                    continue;
-                } else if (part.startsWith("\"") && part.endsWith("\"")) {
-                    // ""일치 키워드: 정확히 일치하는 경우만 하이라이트 처리
-                    String keyword = part.substring(1, part.length() - 1);
-                    sourceString = sourceString.replaceAll("(?i)\\b(" + Pattern.quote(keyword) + ")\\b", "<b>$1</b>");
-                } else {
-                    // 일반 키워드: 포함되는 경우 하이라이트 처리
-                    sourceString = sourceString.replaceAll("(?i)(" + Pattern.quote(part) + ")", "<b>$1</b>");
-                }
-            }
-
-            results.add(sourceString);
-        }
-
-        return results;
-    }
-
+    
     private void indexSearchTerm(ElasticConfiguration elasticConfiguration, SearchCriteria criteria) throws IOException {
         SimpleDateFormat dateFormat = new SimpleDateFormat(TopSearched.DATE_FORMAT.get());
         String formattedDate = dateFormat.format(new Date());
