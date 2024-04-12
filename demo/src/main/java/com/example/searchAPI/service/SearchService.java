@@ -5,13 +5,18 @@ import com.example.searchAPI.constant.search.AdvancedSearch;
 import com.example.searchAPI.constant.search.Category;
 import com.example.searchAPI.constant.search.Period;
 import com.example.searchAPI.constant.search.Sort;
+import com.example.searchAPI.constant.topsearched.TopSearched;
+import com.example.searchAPI.controller.ElasticsearchController;
 import com.example.searchAPI.model.SearchCriteria;
 import com.example.searchAPI.validator.ForbiddenWordValidator;
+import org.elasticsearch.action.index.IndexRequest;
+import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.common.lucene.search.function.CombineFunction;
 import org.elasticsearch.common.text.Text;
+import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.index.query.*;
 import org.elasticsearch.index.query.functionscore.FunctionScoreQueryBuilder;
 import org.elasticsearch.search.SearchHit;
@@ -24,19 +29,27 @@ import org.elasticsearch.search.fetch.subphase.highlight.HighlightBuilder;
 import org.elasticsearch.search.fetch.subphase.highlight.HighlightField;
 import org.elasticsearch.search.sort.SortBuilders;
 import org.elasticsearch.search.sort.SortOrder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
+import java.text.SimpleDateFormat;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Service
 public class SearchService {
 
     @Value("${search.index}")
     private String index;
+
+    @Value("${topsearched.index}")
+    private String topSearchedIndex;
 
     @Value("${search.host}")
     private String host;
@@ -53,6 +66,9 @@ public class SearchService {
     @Value("${search.forbiddenPath}")
     private String forbiddenPath;
 
+
+    private final Logger logger = LoggerFactory.getLogger(ElasticsearchController.class);
+
     public List<String> search(SearchCriteria criteria) {
 
         try (ElasticConfiguration elasticConfiguration = new ElasticConfiguration(host, port, username, protocol)) {
@@ -60,14 +76,13 @@ public class SearchService {
             SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
 
             checkForbiddenWord(criteria.getKeyword());
+            indexSearchTerm(elasticConfiguration, criteria);
             buildAdvancedSearchQuery(criteria.getKeyword(), sourceBuilder, criteria.getFieldDesignation());
             setDateRange(criteria.getPeriod(), sourceBuilder);
             setPage(criteria.getMaxDocument(), criteria.getNowPage(), sourceBuilder);
             sort(criteria.getSortOption(), sourceBuilder, searchRequest);
             setupHighlighting(sourceBuilder);
 
-
-//            setupAggregations(sourceBuilder, criteria.getCategories(), criteria.getCategoryMaxCounts());
             searchRequest.source(sourceBuilder);
             SearchResponse searchResponse = elasticConfiguration.getElasticClient().search(searchRequest, RequestOptions.DEFAULT);
             SearchHits hits = searchResponse.getHits();
@@ -77,92 +92,71 @@ public class SearchService {
 
             if (criteria.getCategories().contains(Category.ALL.get()) || criteria.getCategories().isEmpty()) {
                 for (SearchHit hit : hits.getHits()) {
-                    // 예시로는 _source를 String으로 변환하여 추가합니다.
-                    // 실제로는 hit의 필드 중 필요한 정보를 추출하여 추가해야 할 수 있습니다.
-                    String sourceAsString = hit.getSourceAsString();
-                    results.add(sourceAsString);
+                    Map<String, HighlightField> highlightFields = hit.getHighlightFields();
+                    Map<String, Object> sourceAsMap = hit.getSourceAsMap();
+
+                    Map<String, String> finalDocument = new HashMap<>();
+
+                    sourceAsMap.forEach((key, value) -> {
+                        if (highlightFields.containsKey(key) && highlightFields.get(key).fragments().length > 0) {
+                            String highlightedText = Arrays.stream(highlightFields.get(key).fragments()).map(Text::string).collect(Collectors.joining(" "));
+                            finalDocument.put(key, highlightedText);
+                        } else {
+                            finalDocument.put(key, value.toString());
+                        }
+                    });
+
+                    StringBuilder result = new StringBuilder("{");
+                    finalDocument.forEach((key, value) -> result.append(String.format("\"%s\":\"%s\",", key, value)));
+                    if (!finalDocument.isEmpty()) {
+                        result.deleteCharAt(result.length() - 1);
+                    }
+                    result.append("}");
+
+                    results.add(result.toString());
                 }
                 return results;
             }
 
 
-// 특정 카테고리에 대한 결과만 포함하는 경우
             for (SearchHit hit : hits.getHits()) {
-                String category = (String) hit.getSourceAsMap().get("ctgry"); // 카테고리 필드를 기준으로
-                // 카테고리가 criteria에 포함되어 있는지 확인
+                String category = (String) hit.getSourceAsMap().get(Category.CATEGORY.get());
                 if (criteria.getCategories().contains(category)) {
                     int index = criteria.getCategories().indexOf(category);
                     int maxCount = criteria.getCategoryMaxCounts().get(index);
-
                     List<String> resultsForCategory = categorizedResults.computeIfAbsent(category, k -> new ArrayList<>());
 
-                    // 카테고리별 최대 출력 건수를 초과하지 않는 경우에만 결과를 추가
                     if (resultsForCategory.size() < maxCount) {
+                        Map<String, Object> sourceAsMap = hit.getSourceAsMap();
                         Map<String, HighlightField> highlightFields = hit.getHighlightFields();
-                        StringBuilder fragmentString = new StringBuilder();
 
-                        // 하이라이트 처리된 필드를 가져와서 처리
-                        for (String field : highlightFields.keySet()) {
-                            HighlightField highlight = highlightFields.get(field);
-                            Text[] fragments = highlight.fragments();
-                            for (Text fragment : fragments) {
-                                fragmentString.append(fragment.string());
+                        Map<String, String> documentResults = new HashMap<>();
+
+                        sourceAsMap.forEach((key, value) -> {
+                            if (criteria.getFieldDesignation().contains(key) && highlightFields.containsKey(key) && highlightFields.get(key).fragments().length > 0) {
+                                String highlightedText = Arrays.stream(highlightFields.get(key).fragments()).map(Text::string).collect(Collectors.joining(" "));
+                                documentResults.put(key, highlightedText);
+                            } else {
+                                documentResults.put(key, value.toString());
                             }
-                        }
+                        });
 
-                        // 원본 문서 정보와 하이라이트된 텍스트를 조합
-                        String result = hit.getSourceAsString() + "\nHighlight: " + fragmentString.toString();
-                        resultsForCategory.add(result);
+                        // 결과 문자열 조합
+                        StringBuilder result = new StringBuilder("{");
+                        documentResults.forEach((key, value) -> result.append(String.format("\"%s\":\"%s\",", key, value)));
+                        result.deleteCharAt(result.length() - 1);
+                        result.append("}");
 
+                        resultsForCategory.add(result.toString());
                     }
                 }
             }
 
-// 최종 결과를 하나의 리스트로 합치기
             List<String> finalResults = new ArrayList<>();
             categorizedResults.values().forEach(finalResults::addAll);
-
             return finalResults;
-
-
-//            searchRequest.source(sourceBuilder);
-//            SearchResponse searchResponse = elasticConfiguration.getElasticClient().search(searchRequest, RequestOptions.DEFAULT);
-//            SearchHits hits = searchResponse.getHits();
-//
-//
-//            List<String> results = new ArrayList<>();
-//            for (SearchHit hit : hits.getHits()) {
-//                Map<String, Object> sourceAsMap = hit.getSourceAsMap(); // 원본 문서를 Map 형태로 가져옵니다.
-//                Map<String, HighlightField> highlightFields = hit.getHighlightFields(); // 하이라이트된 필드를 가져옵니다.
-//
-//                // 원본 문서의 모든 필드를 순회하며 하이라이트된 결과가 있으면 대체합니다.
-//                Map<String, String> finalDocument = new LinkedHashMap<>();
-//                for (Map.Entry<String, Object> entry : sourceAsMap.entrySet()) {
-//                    String key = entry.getKey();
-//                    Object value = entry.getValue();
-//
-//                    // 하이라이트 처리된 필드인 경우 하이라이트된 텍스트로 대체
-//                    if (highlightFields.containsKey(key) && highlightFields.get(key).fragments().length > 0) {
-//                        Text[] fragments = highlightFields.get(key).fragments();
-//                        String highlightedText = Arrays.stream(fragments)
-//                                .map(Text::string)
-//                                .collect(Collectors.joining(" "));
-//                        finalDocument.put(key, highlightedText);
-//                    } else {
-//                        finalDocument.put(key, value.toString());
-//                    }
-//                }
-//
-//                // 최종 결과 문자열 구성
-//                String result = finalDocument.entrySet().stream()
-//                        .map(entry -> entry.getKey() + ": " + entry.getValue())
-//                        .collect(Collectors.joining("\n"));
-//                results.add(result);
-//            }
-//            return results;
         } catch (Exception e) {
-            e.printStackTrace();
-            return null;
+            return Collections.singletonList(e.getMessage());
         }
     }
 
@@ -177,10 +171,7 @@ public class SearchService {
             QueryBuilder existingQuery = sourceBuilder.query();
 
             if (!(existingQuery instanceof FunctionScoreQueryBuilder)) {
-                FunctionScoreQueryBuilder functionScoreQueryBuilder = QueryBuilders.functionScoreQuery(
-                        existingQuery,
-                        new FunctionScoreQueryBuilder.FilterFunctionBuilder[]{}
-                ).boostMode(CombineFunction.MULTIPLY);
+                FunctionScoreQueryBuilder functionScoreQueryBuilder = QueryBuilders.functionScoreQuery(existingQuery, new FunctionScoreQueryBuilder.FilterFunctionBuilder[]{}).boostMode(CombineFunction.MULTIPLY);
                 sourceBuilder.query(functionScoreQueryBuilder);
             }
 
@@ -192,31 +183,6 @@ public class SearchService {
         }
         searchRequest.source(sourceBuilder);
     }
-
-//    private String advancedSearchInSpecificFields(List<String> fieldDesignation, String keyword, SearchSourceBuilder sourceBuilder) {
-//        BoolQueryBuilder boolQueryBuilder = QueryBuilders.boolQuery();
-//        String keywordWithoutOperator = keyword;
-//
-//        // 모든 문서를 대상으로 검색할 때 기본적으로 매칭되어야 할 조건을 추가합니다.
-//        boolQueryBuilder.must(QueryBuilders.matchAllQuery());
-//
-//        for (String searchField : fieldDesignation) {
-//            if (keyword.startsWith(AdvancedSearch.INCLUDE.get())) {
-//                keywordWithoutOperator = keyword.substring(1);
-//                boolQueryBuilder.must(QueryBuilders.matchQuery(searchField, keywordWithoutOperator)).boost(2.0f);
-//            } else if (keyword.startsWith(AdvancedSearch.EXCLUDE.get())) {
-//                keywordWithoutOperator = keyword.substring(1);
-//                boolQueryBuilder.mustNot(QueryBuilders.matchQuery(searchField, keywordWithoutOperator)).boost(2.0f);
-//            } else if (keyword.startsWith(AdvancedSearch.EQUAL.get()) && keyword.endsWith(AdvancedSearch.EQUAL.get())) {
-//                keywordWithoutOperator = keyword.substring(1, keyword.length() - 1);
-//                boolQueryBuilder.filter(QueryBuilders.matchPhraseQuery(searchField, keywordWithoutOperator)).boost(2.0f);
-//            } else {
-//                boolQueryBuilder.should(QueryBuilders.matchQuery(searchField, keyword)).boost(2.0f);
-//            }
-//            sourceBuilder.query(boolQueryBuilder);
-//        }
-//        return keywordWithoutOperator;
-//    }
 
     private void setDateRange(String period, SearchSourceBuilder sourceBuilder) {
         LocalDate startDate = null;
@@ -237,10 +203,7 @@ public class SearchService {
             startDate = endDate.minusYears(1);
         }
 
-        RangeQueryBuilder rangeQueryBuilder = QueryBuilders.rangeQuery(Period.TARGET.get())
-                .format(Period.FORMAT.get())
-                .from(startDate.format(DateTimeFormatter.ISO_LOCAL_DATE))
-                .to(endDate.format(DateTimeFormatter.ISO_LOCAL_DATE));
+        RangeQueryBuilder rangeQueryBuilder = QueryBuilders.rangeQuery(Period.TARGET.get()).format(Period.FORMAT.get()).from(startDate.format(DateTimeFormatter.ISO_LOCAL_DATE)).to(endDate.format(DateTimeFormatter.ISO_LOCAL_DATE));
 
         QueryBuilder existingQuery = sourceBuilder.query();
 
@@ -264,10 +227,9 @@ public class SearchService {
 
     private void setupHighlighting(SearchSourceBuilder sourceBuilder) {
         HighlightBuilder highlightBuilder = new HighlightBuilder();
-        highlightBuilder.requireFieldMatch(false); // 필드 일치 요구사항을 비활성화합니다.
-        highlightBuilder.field("*") // 모든 필드를 대상으로 하이라이팅을 적용합니다.
-                .preTags("<b>")
-                .postTags("</b>");
+        highlightBuilder.requireFieldMatch(false);
+        highlightBuilder.field(new HighlightBuilder.Field("*").fragmentSize(10000).numOfFragments(0));
+        highlightBuilder.preTags("<b>").postTags("</b>");
         sourceBuilder.highlighter(highlightBuilder);
     }
 
@@ -346,4 +308,31 @@ public class SearchService {
         return results;
     }
 
+    private void indexSearchTerm(ElasticConfiguration elasticConfiguration, SearchCriteria criteria) throws IOException {
+        SimpleDateFormat dateFormat = new SimpleDateFormat(TopSearched.DATE_FORMAT.get());
+        String formattedDate = dateFormat.format(new Date());
+
+        List<String> termsToIndex = parseAndFilterKeywords(criteria.getKeyword());
+        for (String term : termsToIndex) {
+            IndexRequest indexRequest = new IndexRequest(topSearchedIndex);
+            indexRequest.source(String.format("{\"keyword\": \"%s\", \"searchedDate\": \"%s\"}", term, dateFormat.format(new Date())), XContentType.JSON);
+            IndexResponse response = elasticConfiguration.getElasticClient().index(indexRequest, RequestOptions.DEFAULT);
+            logger.info("Search log Id: {}, keyword: {}, searchedDate: {}", response.getId(), term, formattedDate);
+        }
+    }
+
+    private List<String> parseAndFilterKeywords(String keyword) {
+        List<String> termsToIndex = new ArrayList<>();
+        String[] parts = keyword.split("\\s+");
+        for (String part : parts) {
+            if (!part.startsWith(AdvancedSearch.EXCLUDE.get())) {
+                if (part.startsWith(AdvancedSearch.EQUAL.get()) && part.endsWith(AdvancedSearch.EQUAL.get())) {
+                    termsToIndex.add(part.substring(1, part.length() - 1));
+                } else if (!part.startsWith(AdvancedSearch.INCLUDE.get())) {
+                    termsToIndex.add(part);
+                }
+            }
+        }
+        return termsToIndex;
+    }
 }
