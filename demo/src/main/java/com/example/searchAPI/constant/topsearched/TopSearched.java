@@ -5,7 +5,9 @@ public enum TopSearched {
 
     DATE_FORMAT("yyyy.MM.dd"),
 
-    DELIMETER("~");
+    DELIMETER("~"),
+
+    DATE_PATTERN("\\d{4}\\.\\d{2}\\.\\d{2}~\\d{4}\\.\\d{2}\\.\\d{2}");
 
     private String keyword;
 

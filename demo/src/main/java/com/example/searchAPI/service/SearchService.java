@@ -240,15 +240,15 @@ public class SearchService {
                 for (String field : fieldDesignation) {
                     boolQueryBuilder.mustNot(QueryBuilders.matchQuery(field, excludeKeyword)).boost(2.0f);
                 }
+            } else if (part.startsWith(AdvancedSearch.EQUAL.get()) && part.endsWith(AdvancedSearch.EQUAL.get())) {
+                String exactMatchKeyword = part.substring(1, part.length() - 1);
+                for (String field : fieldDesignation) {
+                    boolQueryBuilder.must(QueryBuilders.termQuery(field, exactMatchKeyword)).boost(2.0f);
+                }
             } else if (part.startsWith(AdvancedSearch.INCLUDE.get())) {
                 String includeKeyword = part.substring(1);
                 for (String field : fieldDesignation) {
                     boolQueryBuilder.must(QueryBuilders.matchQuery(field, includeKeyword)).boost(2.0f);
-                }
-            } else if (part.startsWith(AdvancedSearch.EQUAL.get()) && part.endsWith(AdvancedSearch.EQUAL.get())) {
-                String exactMatchKeyword = part.substring(1, part.length() - 1);
-                for (String field : fieldDesignation) {
-                    boolQueryBuilder.must(QueryBuilders.matchPhraseQuery(field, exactMatchKeyword)).boost(2.0f);
                 }
             } else {
                 for (String field : fieldDesignation) {
@@ -258,7 +258,7 @@ public class SearchService {
         }
         sourceBuilder.query(boolQueryBuilder);
     }
-    
+
     private void indexSearchTerm(ElasticConfiguration elasticConfiguration, SearchCriteria criteria) throws IOException {
         SimpleDateFormat dateFormat = new SimpleDateFormat(TopSearched.DATE_FORMAT.get());
         String formattedDate = dateFormat.format(new Date());
