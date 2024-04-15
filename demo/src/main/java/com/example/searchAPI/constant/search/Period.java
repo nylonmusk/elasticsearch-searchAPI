@@ -8,7 +8,8 @@ public enum Period {
     YEAR("year"),
 
     TARGET("writeDate"),
-    FORMAT("yyyy-MM-dd"),
+
+    DATE_FORMAT("yyyy.MM.dd"),
 
     DELIMETER("~");
 

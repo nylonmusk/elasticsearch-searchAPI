@@ -10,9 +10,8 @@ import java.util.Collections;
 import java.util.List;
 
 public class ForbiddenWordValidator {
+
     private final List<String> configData;
-
-
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ForbiddenWordValidator(String filePath) {

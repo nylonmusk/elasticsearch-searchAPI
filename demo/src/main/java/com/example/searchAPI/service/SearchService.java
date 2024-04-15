@@ -1,14 +1,12 @@
 package com.example.searchAPI.service;
 
 import com.example.searchAPI.config.ElasticConfiguration;
-import com.example.searchAPI.constant.search.AdvancedSearch;
-import com.example.searchAPI.constant.search.Category;
-import com.example.searchAPI.constant.search.Period;
-import com.example.searchAPI.constant.search.Sort;
+import com.example.searchAPI.constant.search.*;
 import com.example.searchAPI.constant.topsearched.TopSearched;
 import com.example.searchAPI.controller.ElasticsearchController;
 import com.example.searchAPI.model.SearchCriteria;
 import com.example.searchAPI.validator.ForbiddenWordValidator;
+import com.example.searchAPI.validator.GenericValidator;
 import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.action.search.SearchRequest;
@@ -19,6 +17,7 @@ import org.elasticsearch.common.text.Text;
 import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.index.query.*;
 import org.elasticsearch.index.query.functionscore.FunctionScoreQueryBuilder;
+import org.elasticsearch.index.search.MatchQuery;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.SearchHits;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
@@ -35,6 +34,7 @@ import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -62,7 +62,6 @@ public class SearchService {
     @Value("${search.forbiddenPath}")
     private String forbiddenPath;
 
-
     private final Logger logger = LoggerFactory.getLogger(ElasticsearchController.class);
 
     public List<String> search(SearchCriteria criteria) {
@@ -83,70 +82,11 @@ public class SearchService {
             SearchResponse searchResponse = elasticConfiguration.getElasticClient().search(searchRequest, RequestOptions.DEFAULT);
             SearchHits hits = searchResponse.getHits();
 
+            List<String> results = processSearchResultsByAllCategories(criteria, hits);
+            if (results != null) return results;
+
             Map<String, List<String>> categorizedResults = new HashMap<>();
-            List<String> results = new ArrayList<>();
-
-            if (criteria.getCategories().contains(Category.ALL.get()) || criteria.getCategories().isEmpty()) {
-                for (SearchHit hit : hits.getHits()) {
-                    Map<String, HighlightField> highlightFields = hit.getHighlightFields();
-                    Map<String, Object> sourceAsMap = hit.getSourceAsMap();
-
-                    Map<String, String> finalDocument = new HashMap<>();
-
-                    sourceAsMap.forEach((key, value) -> {
-                        if (highlightFields.containsKey(key) && highlightFields.get(key).fragments().length > 0) {
-                            String highlightedText = Arrays.stream(highlightFields.get(key).fragments()).map(Text::string).collect(Collectors.joining(" "));
-                            finalDocument.put(key, highlightedText);
-                        } else {
-                            finalDocument.put(key, value.toString());
-                        }
-                    });
-
-                    StringBuilder result = new StringBuilder("{");
-                    finalDocument.forEach((key, value) -> result.append(String.format("\"%s\":\"%s\",", key, value)));
-                    if (!finalDocument.isEmpty()) {
-                        result.deleteCharAt(result.length() - 1);
-                    }
-                    result.append("}");
-
-                    results.add(result.toString());
-                }
-                return results;
-            }
-
-
-            for (SearchHit hit : hits.getHits()) {
-                String category = (String) hit.getSourceAsMap().get(Category.CATEGORY.get());
-                if (criteria.getCategories().contains(category)) {
-                    int index = criteria.getCategories().indexOf(category);
-                    int maxCount = criteria.getCategoryMaxCounts().get(index);
-                    List<String> resultsForCategory = categorizedResults.computeIfAbsent(category, k -> new ArrayList<>());
-
-                    if (resultsForCategory.size() < maxCount) {
-                        Map<String, Object> sourceAsMap = hit.getSourceAsMap();
-                        Map<String, HighlightField> highlightFields = hit.getHighlightFields();
-
-                        Map<String, String> documentResults = new HashMap<>();
-
-                        sourceAsMap.forEach((key, value) -> {
-                            if (criteria.getFieldDesignation().contains(key) && highlightFields.containsKey(key) && highlightFields.get(key).fragments().length > 0) {
-                                String highlightedText = Arrays.stream(highlightFields.get(key).fragments()).map(Text::string).collect(Collectors.joining(" "));
-                                documentResults.put(key, highlightedText);
-                            } else {
-                                documentResults.put(key, value.toString());
-                            }
-                        });
-
-                        // 결과 문자열 조합
-                        StringBuilder result = new StringBuilder("{");
-                        documentResults.forEach((key, value) -> result.append(String.format("\"%s\":\"%s\",", key, value)));
-                        result.deleteCharAt(result.length() - 1);
-                        result.append("}");
-
-                        resultsForCategory.add(result.toString());
-                    }
-                }
-            }
+            processSearchResultsByCategory(criteria, hits, categorizedResults);
 
             List<String> finalResults = new ArrayList<>();
             categorizedResults.values().forEach(finalResults::addAll);
@@ -156,7 +96,98 @@ public class SearchService {
         }
     }
 
-    private void setPage(int maxDocument, int nowPage, SearchSourceBuilder sourceBuilder) {
+    private static List<String> processSearchResultsByAllCategories(SearchCriteria criteria, SearchHits hits) {
+        List<String> results = new ArrayList<>();
+        if (criteria.getCategories().contains(Category.ALL.get()) || criteria.getCategories().isEmpty()) {
+            for (SearchHit hit : hits.getHits()) {
+                Map<String, HighlightField> highlightFields = hit.getHighlightFields();
+                Map<String, Object> sourceAsMap = hit.getSourceAsMap();
+                Map<String, String> finalDocument = new HashMap<>();
+
+                sourceAsMap.forEach((key, value) -> {
+                    if (highlightFields.containsKey(key) && highlightFields.get(key).fragments().length > 0) {
+                        String highlightedText = Arrays.stream(highlightFields.get(key).fragments()).map(Text::string).collect(Collectors.joining(" "));
+                        finalDocument.put(key, highlightedText);
+                    } else {
+                        finalDocument.put(key, value.toString());
+                    }
+                });
+
+                StringBuilder result = new StringBuilder("{");
+                finalDocument.forEach((key, value) -> result.append(String.format("\"%s\":\"%s\",", key, value)));
+                if (!finalDocument.isEmpty()) {
+                    result.deleteCharAt(result.length() - 1);
+                }
+                result.append("}");
+
+                results.add(result.toString());
+            }
+            return results;
+        }
+        return null;
+    }
+
+    private void processSearchResultsByCategory(SearchCriteria criteria, SearchHits hits, Map<String, List<String>> categorizedResults) {
+        boolean searchAllFields = criteria.getFieldDesignation().isEmpty() || (criteria.getFieldDesignation().size() == 1 && Category.ALL.get().equals(criteria.getFieldDesignation().get(0)));
+
+        for (SearchHit hit : hits.getHits()) {
+            String category = (String) hit.getSourceAsMap().get(Category.CATEGORY.get());
+            if (criteria.getCategories().contains(category)) {
+                int index = criteria.getCategories().indexOf(category);
+                int maxCount = criteria.getCategoryMaxCounts().get(index);
+                List<String> resultsForCategory = categorizedResults.computeIfAbsent(category, k -> new ArrayList<>());
+
+                if (resultsForCategory.size() < maxCount) {
+                    Map<String, Object> sourceAsMap = hit.getSourceAsMap();
+                    Map<String, HighlightField> highlightFields = hit.getHighlightFields();
+
+                    Map<String, String> documentResults = new HashMap<>();
+
+                    if (searchAllFields) {
+                        // 모든 필드에 대해 하이라이트 처리 및 값 저장
+                        sourceAsMap.forEach((key, value) -> {
+                            if (highlightFields.containsKey(key) && highlightFields.get(key).fragments().length > 0) {
+                                String highlightedText = Arrays.stream(highlightFields.get(key).fragments()).map(Text::string).collect(Collectors.joining(" "));
+                                documentResults.put(key, highlightedText);
+                            } else {
+                                documentResults.put(key, value.toString());
+                            }
+                        });
+                    } else {
+                        // 지정된 필드로 검색 조건 확인 및 하이라이트 처리
+                        criteria.getFieldDesignation().forEach(field -> {
+                            if (sourceAsMap.containsKey(field)) {
+                                if (highlightFields.containsKey(field) && highlightFields.get(field).fragments().length > 0) {
+                                    String highlightedText = Arrays.stream(highlightFields.get(field).fragments()).map(Text::string).collect(Collectors.joining(" "));
+                                    documentResults.put(field, highlightedText);
+                                } else {
+                                    documentResults.put(field, sourceAsMap.get(field).toString());
+                                }
+                            }
+                        });
+                        // 검색 조건 필드 외의 다른 모든 필드도 결과에 포함
+                        sourceAsMap.forEach((key, value) -> {
+                            if (!documentResults.containsKey(key)) {
+                                documentResults.put(key, value.toString());
+                            }
+                        });
+                    }
+
+                    // 결과 문자열 조합
+                    StringBuilder result = new StringBuilder("{");
+                    documentResults.forEach((key, value) -> result.append(String.format("\"%s\":\"%s\",", key, value)));
+                    if (!documentResults.isEmpty()) {
+                        result.deleteCharAt(result.length() - 1);
+                    }
+                    result.append("}");
+
+                    resultsForCategory.add(result.toString());
+                }
+            }
+        }
+    }
+
+    private void setPage(Integer maxDocument, Integer nowPage, SearchSourceBuilder sourceBuilder) {
         int from = (nowPage - 1) * maxDocument;
         sourceBuilder.from(from);
         sourceBuilder.size(maxDocument);
@@ -170,7 +201,6 @@ public class SearchService {
                 FunctionScoreQueryBuilder functionScoreQueryBuilder = QueryBuilders.functionScoreQuery(existingQuery, new FunctionScoreQueryBuilder.FilterFunctionBuilder[]{}).boostMode(CombineFunction.MULTIPLY);
                 sourceBuilder.query(functionScoreQueryBuilder);
             }
-
             sourceBuilder.minScore(2.0f);
         } else if (sortOption.equals(Sort.LATEST.get())) {
             sourceBuilder.sort(SortBuilders.fieldSort(Sort.TARGET.get()).order(SortOrder.DESC));
@@ -183,12 +213,15 @@ public class SearchService {
     private void setDateRange(String period, SearchSourceBuilder sourceBuilder) {
         LocalDate startDate = null;
         LocalDate endDate = LocalDate.now();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(Period.DATE_FORMAT.get());
+
+        isValid(period);
 
         if (Period.ALL.get().equalsIgnoreCase(period)) return;
 
         if (period.contains(Period.DELIMETER.get())) {
-            startDate = LocalDate.parse(period.split(Period.DELIMETER.get())[0]);
-            endDate = LocalDate.parse(period.split(Period.DELIMETER.get())[1]);
+            startDate = LocalDate.parse(period.split(Period.DELIMETER.get())[0].trim(), formatter);
+            endDate = LocalDate.parse(period.split(Period.DELIMETER.get())[1].trim(), formatter);
         } else if (Period.DAY.get().equalsIgnoreCase(period)) {
             startDate = endDate.minusDays(1);
         } else if (Period.WEEK.get().equalsIgnoreCase(period)) {
@@ -199,7 +232,7 @@ public class SearchService {
             startDate = endDate.minusYears(1);
         }
 
-        RangeQueryBuilder rangeQueryBuilder = QueryBuilders.rangeQuery(Period.TARGET.get()).format(Period.FORMAT.get()).from(startDate.format(DateTimeFormatter.ISO_LOCAL_DATE)).to(endDate.format(DateTimeFormatter.ISO_LOCAL_DATE));
+        RangeQueryBuilder rangeQueryBuilder = QueryBuilders.rangeQuery(Period.TARGET.get()).format(Period.DATE_FORMAT.get()).from(startDate.format(formatter)).to(endDate.format(formatter));
 
         QueryBuilder existingQuery = sourceBuilder.query();
 
@@ -232,27 +265,48 @@ public class SearchService {
     private void buildAdvancedSearchQuery(String keyword, SearchSourceBuilder sourceBuilder, List<String> fieldDesignation) {
         BoolQueryBuilder boolQueryBuilder = QueryBuilders.boolQuery();
 
+        boolean searchAllFields = fieldDesignation.isEmpty() || (fieldDesignation.size() == 1 && Field.ALL.get().equals(fieldDesignation.get(0)));
+
         String[] parts = keyword.split("\\s+");
 
         for (String part : parts) {
+
+            if (part.isEmpty()) continue;
+
             if (part.startsWith(AdvancedSearch.EXCLUDE.get())) {
-                String excludeKeyword = part.substring(1);
-                for (String field : fieldDesignation) {
-                    boolQueryBuilder.mustNot(QueryBuilders.matchQuery(field, excludeKeyword)).boost(2.0f);
+                String excludeKeyword = part.substring(1).trim();
+                if (searchAllFields) {
+                    boolQueryBuilder.mustNot(QueryBuilders.multiMatchQuery(excludeKeyword, "*")).boost(2.0f);
+                } else {
+                    for (String field : fieldDesignation) {
+                        boolQueryBuilder.mustNot(QueryBuilders.matchQuery(field, excludeKeyword)).boost(2.0f);
+                    }
                 }
             } else if (part.startsWith(AdvancedSearch.EQUAL.get()) && part.endsWith(AdvancedSearch.EQUAL.get())) {
-                String exactMatchKeyword = part.substring(1, part.length() - 1);
-                for (String field : fieldDesignation) {
-                    boolQueryBuilder.must(QueryBuilders.termQuery(field, exactMatchKeyword)).boost(2.0f);
+                String exactMatchKeyword = part.substring(1, part.length() - 1).trim();
+                if (searchAllFields) {
+                    boolQueryBuilder.must(QueryBuilders.multiMatchQuery(exactMatchKeyword, "*").type(MatchQuery.Type.PHRASE)).boost(2.0f);
+                } else {
+                    for (String field : fieldDesignation) {
+                        boolQueryBuilder.must(QueryBuilders.termQuery(field, exactMatchKeyword)).boost(2.0f);
+                    }
                 }
             } else if (part.startsWith(AdvancedSearch.INCLUDE.get())) {
-                String includeKeyword = part.substring(1);
-                for (String field : fieldDesignation) {
-                    boolQueryBuilder.must(QueryBuilders.matchQuery(field, includeKeyword)).boost(2.0f);
+                String includeKeyword = part.substring(1).trim();
+                if (searchAllFields) {
+                    boolQueryBuilder.must(QueryBuilders.multiMatchQuery(includeKeyword, "*")).boost(2.0f);
+                } else {
+                    for (String field : fieldDesignation) {
+                        boolQueryBuilder.must(QueryBuilders.matchQuery(field, includeKeyword)).boost(2.0f);
+                    }
                 }
             } else {
-                for (String field : fieldDesignation) {
-                    boolQueryBuilder.should(QueryBuilders.matchQuery(field, part)).boost(2.0f);
+                if (searchAllFields) {
+                    boolQueryBuilder.should(QueryBuilders.multiMatchQuery(part, "*")).boost(2.0f);
+                } else {
+                    for (String field : fieldDesignation) {
+                        boolQueryBuilder.should(QueryBuilders.matchQuery(field, part)).boost(2.0f);
+                    }
                 }
             }
         }
@@ -275,15 +329,57 @@ public class SearchService {
     private List<String> parseAndFilterKeywords(String keyword) {
         List<String> termsToIndex = new ArrayList<>();
         String[] parts = keyword.split("\\s+");
+
         for (String part : parts) {
-            if (!part.startsWith(AdvancedSearch.EXCLUDE.get())) {
-                if (part.startsWith(AdvancedSearch.EQUAL.get()) && part.endsWith(AdvancedSearch.EQUAL.get())) {
-                    termsToIndex.add(part.substring(1, part.length() - 1));
-                } else if (!part.startsWith(AdvancedSearch.INCLUDE.get())) {
-                    termsToIndex.add(part);
-                }
+            if (part.startsWith(AdvancedSearch.EXCLUDE.get())) {
+                continue;
+            }
+
+            if (part.startsWith(AdvancedSearch.INCLUDE.get()) && !part.substring(1).isEmpty()) {
+                termsToIndex.add(part.substring(1));
+            } else if (part.startsWith(AdvancedSearch.EQUAL.get()) && part.endsWith(AdvancedSearch.EQUAL.get()) && !part.substring(1, part.length() - 1).isEmpty()) {
+                termsToIndex.add(part.substring(1, part.length() - 1));
+            } else if (!part.equals("+") && !part.equals("\"\"") && !part.isEmpty()) {
+                termsToIndex.add(part);
             }
         }
         return termsToIndex;
+    }
+
+    private void isValid(String period) {
+        for (Period specificPeriod : Period.values()) {
+            if (period.equals(specificPeriod.get())) return;
+        }
+
+        if (!GenericValidator.isNullOrEmpty(period) && !checkIsValidPeriod(period)) {
+            throw new IllegalArgumentException("올바른 날짜 형식을 입력하세요. (전체 기간: 'all' 또는 공백 입력   특정 기간 선택: 'year', 'month', 'week', 'day', 'yyyy.MM.dd~yyyy.MM.dd' 형식으로 입력해주세요.)");
+        }
+    }
+
+    private boolean checkIsValidPeriod(String period) {
+        LocalDate today = LocalDate.now();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(TopSearched.DATE_FORMAT.get());
+
+        if (period.contains(TopSearched.DELIMETER.get())) {
+            String[] periods = period.split(TopSearched.DELIMETER.get());
+            if (periods.length != 2) {
+                return false;
+            }
+
+            try {
+                LocalDate startDate = LocalDate.parse(periods[0].trim(), formatter);
+                LocalDate endDate = LocalDate.parse(periods[1].trim(), formatter);
+
+                return (startDate.isEqual(today) || startDate.isBefore(today)) &&
+                        (endDate.isEqual(today) || endDate.isBefore(today)) &&
+                        (startDate.isEqual(endDate) || startDate.isBefore(endDate)) &&
+                        periods[0].trim().matches(TopSearched.DATE_PATTERN.get()) &&
+                        periods[1].trim().matches(TopSearched.DATE_PATTERN.get());
+            } catch (DateTimeParseException e) {
+                return false;
+            }
+        }
+
+        return period.trim().equals(TopSearched.ALL.get());
     }
 }
