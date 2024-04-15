@@ -20,7 +20,6 @@ public class GenericValidator {
         return false;
     }
 
-
     public static boolean isString(Object obj) {
         return obj instanceof String;
     }
