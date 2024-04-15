@@ -15,15 +15,15 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
 public class TopSearchedService {
-
-    @Value("${topsearched.index}")
-    private String topSearchedIndex;
 
     @Value("${search.host}")
     private String host;
@@ -36,6 +36,9 @@ public class TopSearchedService {
 
     @Value("${search.protocol}")
     private String protocol;
+
+    @Value("${topsearched.index}")
+    private String topSearchedIndex;
 
     @Value("${topsearched.field.date}")
     private String date;
@@ -98,7 +101,29 @@ public class TopSearchedService {
     }
 
     private boolean checkIsValidPeriod(String period) {
-        String trimmedPeriod = period.trim();
-        return (trimmedPeriod.equals(TopSearched.ALL.get()) || trimmedPeriod.matches(TopSearched.DATE_PATTERN.get()));
+        LocalDate today = LocalDate.now();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(TopSearched.DATE_FORMAT.get());
+
+        if (period.contains(TopSearched.DELIMETER.get())) {
+            String[] periods = period.split(TopSearched.DELIMETER.get());
+            if (periods.length != 2) {
+                return false;
+            }
+
+            try {
+                LocalDate startDate = LocalDate.parse(periods[0].trim(), formatter);
+                LocalDate endDate = LocalDate.parse(periods[1].trim(), formatter);
+
+                return (startDate.isEqual(today) || startDate.isBefore(today)) &&
+                        (endDate.isEqual(today) || endDate.isBefore(today)) &&
+                        (startDate.isEqual(endDate) || startDate.isBefore(endDate)) &&
+                        periods[0].trim().matches(TopSearched.DATE_PATTERN.get()) &&
+                        periods[1].trim().matches(TopSearched.DATE_PATTERN.get());
+            } catch (DateTimeParseException e) {
+                return false;
+            }
+        }
+
+        return period.trim().equals(TopSearched.ALL.get());
     }
 }

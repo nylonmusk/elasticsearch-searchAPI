@@ -17,7 +17,8 @@ public class TopSearchedController {
     private TopSearchedService topSearchedService;
 
     @GetMapping("/")
-    public List<String> topSearched(@RequestParam(required = false) String period, @RequestParam(required = false) Integer N) {
+    public List<String> topSearched(@RequestParam(required = false) String period,
+                                    @RequestParam(required = false) Integer N) {
         return topSearchedService.topSearched(period, N);
     }
 }
