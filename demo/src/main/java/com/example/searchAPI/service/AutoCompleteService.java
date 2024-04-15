@@ -5,6 +5,7 @@ import com.example.searchAPI.constant.autocomplete.Option;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.RequestOptions;
+import org.elasticsearch.common.text.Text;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
@@ -14,10 +15,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -43,7 +41,6 @@ public class AutoCompleteService {
     @Value("${search.protocol}")
     private String protocol;
 
-
     public List<String> autoComplete(String keyword, String option) {
         try (ElasticConfiguration elasticConfiguration = new ElasticConfiguration(host, port, username, protocol)) {
             SearchRequest searchRequest = new SearchRequest(autocompleteIndex);
@@ -53,6 +50,7 @@ public class AutoCompleteService {
             highlightBuilder.field(field);
             highlightBuilder.preTags("<em>");
             highlightBuilder.postTags("</em>");
+            highlightBuilder.numOfFragments(0);
             searchSourceBuilder.highlighter(highlightBuilder);
 
             getQueryBuilder(keyword, option, searchSourceBuilder, field);
@@ -66,11 +64,12 @@ public class AutoCompleteService {
             for (SearchHit hit : searchResponse.getHits().getHits()) {
                 HighlightField highlightField = hit.getHighlightFields().get(field);
                 if (highlightField != null) {
-                    String text = highlightField.fragments()[0].string();
-                    Matcher matcher = pattern.matcher(text);
-                    while (matcher.find()) {
-                        String matched = matcher.group(1);
-                        frequencyMap.put(matched, frequencyMap.getOrDefault(matched, 0) + 1);
+                    for (Text fragment : highlightField.fragments()) {
+                        Matcher matcher = pattern.matcher(fragment.string());
+                        while (matcher.find()) {
+                            String matched = matcher.group(1);
+                            frequencyMap.put(matched, frequencyMap.getOrDefault(matched, 0) + 1);
+                        }
                     }
                 }
             }
@@ -80,13 +79,14 @@ public class AutoCompleteService {
                     .map(Map.Entry::getKey)
                     .collect(Collectors.toList());
         } catch (IOException | IllegalArgumentException e) {
-            List<String> errorMessages = new ArrayList<>();
-            errorMessages.add(e.getMessage());
-            return errorMessages;
+            return Collections.singletonList(e.getMessage());
         }
     }
 
     private static void getQueryBuilder(String keyword, String option, SearchSourceBuilder searchSourceBuilder, String field) {
+        option = option.trim();
+        if (option.isEmpty()) return;
+
         if (option.equals(Option.PREFIX.get())) {
             searchSourceBuilder.query(QueryBuilders.prefixQuery(field, keyword));
         } else if (option.equals(Option.SUFFIX.get())) {
