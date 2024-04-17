@@ -17,8 +17,8 @@ public class AutoCompleteController {
     private AutoCompleteService autoCompleteService;
 
     @GetMapping("/")
-    public List<String> autoComplete(@RequestParam(value = "keyword") String keyword,
-                                     @RequestParam(value = "option") String option) {
+    public List<String> autoComplete(@RequestParam String keyword,
+                                     @RequestParam String option) {
         return autoCompleteService.autoComplete(keyword, option);
     }
 }

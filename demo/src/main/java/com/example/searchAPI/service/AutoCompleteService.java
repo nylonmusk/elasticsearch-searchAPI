@@ -48,10 +48,11 @@ public class AutoCompleteService {
 
             HighlightBuilder highlightBuilder = new HighlightBuilder();
             highlightBuilder.field(field);
-            highlightBuilder.preTags("<em>");
-            highlightBuilder.postTags("</em>");
+            highlightBuilder.preTags("<b>");
+            highlightBuilder.postTags("</b>");
             highlightBuilder.numOfFragments(0);
             searchSourceBuilder.highlighter(highlightBuilder);
+            searchSourceBuilder.size(100);
 
             getQueryBuilder(keyword, option, searchSourceBuilder, field);
 
@@ -59,7 +60,7 @@ public class AutoCompleteService {
 
             SearchResponse searchResponse = elasticConfiguration.getElasticClient().search(searchRequest, RequestOptions.DEFAULT);
             Map<String, Integer> frequencyMap = new HashMap<>();
-            Pattern pattern = Pattern.compile("<em>(.*?)</em>");
+            Pattern pattern = Pattern.compile("<b>(.*?)</b>");
 
             for (SearchHit hit : searchResponse.getHits().getHits()) {
                 HighlightField highlightField = hit.getHighlightFields().get(field);
