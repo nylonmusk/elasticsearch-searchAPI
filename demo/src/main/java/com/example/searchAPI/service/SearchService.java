@@ -65,7 +65,6 @@ public class SearchService {
     private final Logger logger = LoggerFactory.getLogger(ElasticsearchController.class);
 
     public List<String> search(SearchCriteria criteria) {
-
         try (ElasticConfiguration elasticConfiguration = new ElasticConfiguration(host, port, username, protocol)) {
             SearchRequest searchRequest = new SearchRequest(index);
             SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
@@ -144,7 +143,6 @@ public class SearchService {
                     Map<String, String> documentResults = new HashMap<>();
 
                     if (searchAllFields) {
-                        // 모든 필드에 대해 하이라이트 처리 및 값 저장
                         sourceAsMap.forEach((key, value) -> {
                             if (highlightFields.containsKey(key) && highlightFields.get(key).fragments().length > 0) {
                                 String highlightedText = Arrays.stream(highlightFields.get(key).fragments()).map(Text::string).collect(Collectors.joining(" "));
@@ -154,7 +152,6 @@ public class SearchService {
                             }
                         });
                     } else {
-                        // 지정된 필드로 검색 조건 확인 및 하이라이트 처리
                         criteria.getFieldDesignation().forEach(field -> {
                             if (sourceAsMap.containsKey(field)) {
                                 if (highlightFields.containsKey(field) && highlightFields.get(field).fragments().length > 0) {
@@ -165,7 +162,7 @@ public class SearchService {
                                 }
                             }
                         });
-                        // 검색 조건 필드 외의 다른 모든 필드도 결과에 포함
+
                         sourceAsMap.forEach((key, value) -> {
                             if (!documentResults.containsKey(key)) {
                                 documentResults.put(key, value.toString());
@@ -173,7 +170,6 @@ public class SearchService {
                         });
                     }
 
-                    // 결과 문자열 조합
                     StringBuilder result = new StringBuilder("{");
                     documentResults.forEach((key, value) -> result.append(String.format("\"%s\":\"%s\",", key, value)));
                     if (!documentResults.isEmpty()) {
@@ -238,12 +234,6 @@ public class SearchService {
 
         if (existingQuery instanceof BoolQueryBuilder) {
             ((BoolQueryBuilder) existingQuery).filter(rangeQueryBuilder);
-        } else {
-            BoolQueryBuilder newBoolQuery = QueryBuilders.boolQuery().filter(rangeQueryBuilder);
-            if (existingQuery != null) {
-                newBoolQuery.must(existingQuery);
-            }
-            sourceBuilder.query(newBoolQuery);
         }
     }
 
@@ -266,15 +256,14 @@ public class SearchService {
         BoolQueryBuilder boolQueryBuilder = QueryBuilders.boolQuery();
 
         boolean searchAllFields = fieldDesignation.isEmpty() || (fieldDesignation.size() == 1 && Field.ALL.get().equals(fieldDesignation.get(0)));
+        List<String> keywords = getKeywords(keyword);
 
-        String[] parts = keyword.split("\\s+");
+        for (String word : keywords) {
 
-        for (String part : parts) {
+            if (word.isEmpty()) continue;
 
-            if (part.isEmpty()) continue;
-
-            if (part.startsWith(AdvancedSearch.EXCLUDE.get())) {
-                String excludeKeyword = part.substring(1).trim();
+            if (word.startsWith(AdvancedSearch.EXCLUDE.get())) {
+                String excludeKeyword = word.substring(1);
                 if (searchAllFields) {
                     boolQueryBuilder.mustNot(QueryBuilders.multiMatchQuery(excludeKeyword, "*")).boost(2.0f);
                 } else {
@@ -282,8 +271,8 @@ public class SearchService {
                         boolQueryBuilder.mustNot(QueryBuilders.matchQuery(field, excludeKeyword)).boost(2.0f);
                     }
                 }
-            } else if (part.startsWith(AdvancedSearch.EQUAL.get()) && part.endsWith(AdvancedSearch.EQUAL.get())) {
-                String exactMatchKeyword = part.substring(1, part.length() - 1).trim();
+            } else if (word.startsWith(AdvancedSearch.EQUAL.get()) && word.endsWith(AdvancedSearch.EQUAL.get())) {
+                String exactMatchKeyword = word.substring(1, word.length() - 1);
                 if (searchAllFields) {
                     boolQueryBuilder.must(QueryBuilders.multiMatchQuery(exactMatchKeyword, "*").type(MatchQuery.Type.PHRASE)).boost(2.0f);
                 } else {
@@ -291,8 +280,8 @@ public class SearchService {
                         boolQueryBuilder.must(QueryBuilders.termQuery(field, exactMatchKeyword)).boost(2.0f);
                     }
                 }
-            } else if (part.startsWith(AdvancedSearch.INCLUDE.get())) {
-                String includeKeyword = part.substring(1).trim();
+            } else if (word.startsWith(AdvancedSearch.INCLUDE.get())) {
+                String includeKeyword = word.substring(1);
                 if (searchAllFields) {
                     boolQueryBuilder.must(QueryBuilders.multiMatchQuery(includeKeyword, "*")).boost(2.0f);
                 } else {
@@ -302,10 +291,10 @@ public class SearchService {
                 }
             } else {
                 if (searchAllFields) {
-                    boolQueryBuilder.should(QueryBuilders.multiMatchQuery(part, "*")).boost(2.0f);
+                    boolQueryBuilder.should(QueryBuilders.multiMatchQuery(word, "*")).boost(2.0f);
                 } else {
                     for (String field : fieldDesignation) {
-                        boolQueryBuilder.should(QueryBuilders.matchQuery(field, part)).boost(2.0f);
+                        boolQueryBuilder.should(QueryBuilders.matchQuery(field, word)).boost(2.0f);
                     }
                 }
             }
@@ -328,19 +317,19 @@ public class SearchService {
 
     private List<String> parseAndFilterKeywords(String keyword) {
         List<String> termsToIndex = new ArrayList<>();
-        String[] parts = keyword.split("\\s+");
+        List<String> keywords = getKeywords(keyword);
 
-        for (String part : parts) {
-            if (part.startsWith(AdvancedSearch.EXCLUDE.get())) {
+        for (String word : keywords) {
+            if (word.startsWith(AdvancedSearch.EXCLUDE.get()) || word.isEmpty()) {
                 continue;
             }
 
-            if (part.startsWith(AdvancedSearch.INCLUDE.get()) && !part.substring(1).isEmpty()) {
-                termsToIndex.add(part.substring(1));
-            } else if (part.startsWith(AdvancedSearch.EQUAL.get()) && part.endsWith(AdvancedSearch.EQUAL.get()) && !part.substring(1, part.length() - 1).isEmpty()) {
-                termsToIndex.add(part.substring(1, part.length() - 1));
-            } else if (!part.equals("+") && !part.equals("\"\"") && !part.isEmpty()) {
-                termsToIndex.add(part);
+            if (word.startsWith(AdvancedSearch.INCLUDE.get()) && !word.substring(1).isEmpty()) {
+                termsToIndex.add(word.substring(1).trim());
+            } else if (word.startsWith(AdvancedSearch.EQUAL.get()) && word.endsWith(AdvancedSearch.EQUAL.get()) && !word.substring(1, word.length() - 1).isEmpty()) {
+                termsToIndex.add(word.substring(1, word.length() - 1).trim());
+            } else if (!word.equals("+") && !word.equals("\"\"") && !word.isEmpty()) {
+                termsToIndex.add(word.trim());
             }
         }
         return termsToIndex;
@@ -381,5 +370,39 @@ public class SearchService {
         }
 
         return period.trim().equals(TopSearched.ALL.get());
+    }
+
+    private static List<String> getKeywords(String keyword) {
+        List<String> keywords = new ArrayList<>();
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < keyword.length(); i++) {
+
+            if (i == keyword.length() - 1) {
+                builder.append(keyword.charAt(i));
+                keywords.add(builder.toString().trim());
+            }
+
+            if (keyword.charAt(i) == '+' || keyword.charAt(i) == '-') {
+                keywords.add(builder.toString().trim());
+                builder.setLength(0);
+                builder.append(keyword.charAt(i));
+            } else if (keyword.charAt(i) == '\"') {
+                keywords.add(builder.toString().trim());
+                builder.setLength(0);
+                builder.append(keyword.charAt(i++));
+                while (keyword.charAt(i) != '\"') {
+                    builder.append(keyword.charAt(i++));
+                }
+                builder.append(keyword.charAt(i++));
+                while (keyword.charAt(i) == ' ') {
+                    i++;
+                }
+                keywords.add(builder.toString().trim());
+                builder.setLength(0);
+            } else {
+                builder.append(keyword.charAt(i));
+            }
+        }
+        return keywords;
     }
 }
