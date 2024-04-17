@@ -50,7 +50,7 @@ public class TopSearchedService {
         try (ElasticConfiguration elasticConfiguration = new ElasticConfiguration(host, port, username, protocol)) {
             SearchRequest searchRequest = new SearchRequest(topSearchedIndex);
             SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
-            isValidParameter(period, N);
+            isValidParameter(period);
             QueryBuilder queryBuilder = buildDateRangeQuery(period);
             searchSourceBuilder.query(queryBuilder);
             setTopSearchedSize(N, searchSourceBuilder, keyword);
@@ -91,10 +91,7 @@ public class TopSearchedService {
         }
     }
 
-    private void isValidParameter(String period, Integer N) {
-        if (N != null && !GenericValidator.isInteger(N)) {
-            throw new IllegalArgumentException("올바른 크기를 입력하세요.)");
-        }
+    private void isValidParameter(String period) {
         if (!GenericValidator.isNullOrEmpty(period) && !checkIsValidPeriod(period)) {
             throw new IllegalArgumentException("올바른 날짜 형식을 입력하세요. (전체 기간: 'all' 또는 공백 입력   특정 기간 선택: 'yyyy.MM.dd~yyyy.MM.dd' 형식으로 입력해주세요.)");
         }
