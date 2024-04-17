@@ -69,7 +69,6 @@ public class AutoCompleteService {
                     }
                 }
             }
-            System.out.println(frequencyMap);
 
             return frequencyMap.entrySet().stream()
                     .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())

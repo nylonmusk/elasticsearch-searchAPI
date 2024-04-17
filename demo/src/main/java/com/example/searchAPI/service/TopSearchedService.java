@@ -63,7 +63,6 @@ public class TopSearchedService {
             setTopSearchedSize(N, searchSourceBuilder, keyword);
             searchRequest.source(searchSourceBuilder);
             SearchResponse response = elasticConfiguration.getElasticClient().search(searchRequest, RequestOptions.DEFAULT);
-            System.out.println(searchRequest.source());
             Terms terms = response.getAggregations().get(topSearchedBucketName);
             List<TopSearchedData> topSearchedData = new ArrayList<>();
 

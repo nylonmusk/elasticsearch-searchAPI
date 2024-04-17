@@ -301,7 +301,6 @@ public class SearchService {
             }
         }
         sourceBuilder.query(boolQueryBuilder);
-        logger.info(sourceBuilder.query().toString());
     }
 
     private void indexSearchTerm(ElasticConfiguration elasticConfiguration, SearchCriteria criteria) throws IOException {
