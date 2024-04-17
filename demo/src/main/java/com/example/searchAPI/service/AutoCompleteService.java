@@ -11,6 +11,7 @@ import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.search.fetch.subphase.highlight.HighlightBuilder;
 import org.elasticsearch.search.fetch.subphase.highlight.HighlightField;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -26,26 +27,17 @@ import java.util.stream.Collectors;
 @Service
 public class AutoCompleteService {
 
+    @Autowired
+    private ElasticConfiguration elasticConfiguration;
+
     @Value("${autocomplete.index}")
     private String autocompleteIndex;
 
     @Value("${autocomplete.field}")
     private String field;
 
-    @Value("${search.host}")
-    private String host;
-
-    @Value("${search.port}")
-    private int port;
-
-    @Value("${search.username}")
-    private String username;
-
-    @Value("${search.protocol}")
-    private String protocol;
-
     public List<String> autoComplete(String keyword, String option) {
-        try (ElasticConfiguration elasticConfiguration = new ElasticConfiguration(host, port, username, protocol)) {
+        try {
             SearchRequest searchRequest = new SearchRequest(autocompleteIndex);
             SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
 
@@ -57,10 +49,10 @@ public class AutoCompleteService {
             searchSourceBuilder.highlighter(highlightBuilder);
             searchSourceBuilder.size(100);
 
+
             getQueryBuilder(keyword, option, searchSourceBuilder, field);
 
             searchRequest.source(searchSourceBuilder);
-
             SearchResponse searchResponse = elasticConfiguration.getElasticClient().search(searchRequest, RequestOptions.DEFAULT);
             Map<String, Integer> frequencyMap = new HashMap<>();
             Pattern pattern = Pattern.compile("<b>(.*?)</b>");
@@ -77,6 +69,7 @@ public class AutoCompleteService {
                     }
                 }
             }
+            System.out.println(frequencyMap);
 
             return frequencyMap.entrySet().stream()
                     .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())

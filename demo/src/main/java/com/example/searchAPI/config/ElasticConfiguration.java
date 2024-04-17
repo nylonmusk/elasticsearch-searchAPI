@@ -8,21 +8,38 @@ import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestClientBuilder;
 import org.elasticsearch.client.RestHighLevelClient;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.stereotype.Component;
 
 import java.io.Closeable;
 import java.io.IOException;
 
+@Configuration
 public class ElasticConfiguration implements Closeable {
 
-    private final RestHighLevelClient elasticClient;
+    @Value("${search.host}")
+    private String host;
 
-    public ElasticConfiguration(String host, int port, String user, String protocol) {
-        elasticClient = createElasticsearchClient(host, port, user, protocol);
-    }
+    @Value("${search.port}")
+    private int port;
+
+    @Value("${search.username}")
+    private String user;
+
+    @Value("${search.protocol}")
+    private String protocol;
+
+    private RestHighLevelClient elasticClient;
+
+//    public ElasticConfiguration(String host, int port, String user, String protocol) {
+//        elasticClient = createElasticsearchClient(host, port, user, protocol);
+//    }
 
     @Bean
     public RestHighLevelClient getElasticClient() {
+        elasticClient = createElasticsearchClient(host, port, user, protocol);
         return elasticClient;
     }
 

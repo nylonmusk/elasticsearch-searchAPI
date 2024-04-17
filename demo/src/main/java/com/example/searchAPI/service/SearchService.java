@@ -30,6 +30,7 @@ import org.elasticsearch.search.sort.SortBuilders;
 import org.elasticsearch.search.sort.SortOrder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -50,23 +51,14 @@ import java.util.stream.Collectors;
 @Service
 public class SearchService {
 
+    @Autowired
+    private ElasticConfiguration elasticConfiguration;
+
     @Value("${search.index}")
     private String index;
 
     @Value("${topsearched.index}")
     private String topSearchedIndex;
-
-    @Value("${search.host}")
-    private String host;
-
-    @Value("${search.port}")
-    private int port;
-
-    @Value("${search.username}")
-    private String username;
-
-    @Value("${search.protocol}")
-    private String protocol;
 
     @Value("${search.forbiddenPath}")
     private String forbiddenPath;
@@ -74,7 +66,7 @@ public class SearchService {
     private final Logger logger = LoggerFactory.getLogger(ElasticsearchController.class);
 
     public List<String> search(SearchCriteria criteria) {
-        try (ElasticConfiguration elasticConfiguration = new ElasticConfiguration(host, port, username, protocol)) {
+        try {
             SearchRequest searchRequest = new SearchRequest(index);
             SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
 
@@ -309,6 +301,7 @@ public class SearchService {
             }
         }
         sourceBuilder.query(boolQueryBuilder);
+        logger.info(sourceBuilder.query().toString());
     }
 
     private void indexSearchTerm(ElasticConfiguration elasticConfiguration, SearchCriteria criteria) throws IOException {
