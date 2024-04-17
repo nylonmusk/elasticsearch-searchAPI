@@ -15,7 +15,10 @@ import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.common.lucene.search.function.CombineFunction;
 import org.elasticsearch.common.text.Text;
 import org.elasticsearch.common.xcontent.XContentType;
-import org.elasticsearch.index.query.*;
+import org.elasticsearch.index.query.BoolQueryBuilder;
+import org.elasticsearch.index.query.QueryBuilder;
+import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.index.query.RangeQueryBuilder;
 import org.elasticsearch.index.query.functionscore.FunctionScoreQueryBuilder;
 import org.elasticsearch.index.search.MatchQuery;
 import org.elasticsearch.search.SearchHit;
@@ -35,7 +38,13 @@ import java.text.SimpleDateFormat;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -377,7 +386,7 @@ public class SearchService {
         StringBuilder builder = new StringBuilder();
         for (int i = 0; i < keyword.length(); i++) {
 
-            if (i == keyword.length() - 1) {
+            if (i >= keyword.length() - 1) {
                 builder.append(keyword.charAt(i));
                 keywords.add(builder.toString().trim());
             }
@@ -393,7 +402,7 @@ public class SearchService {
                 while (keyword.charAt(i) != '\"') {
                     builder.append(keyword.charAt(i++));
                 }
-                builder.append(keyword.charAt(i++));
+                builder.append(keyword.charAt(i));
                 while (keyword.charAt(i) == ' ') {
                     i++;
                 }
