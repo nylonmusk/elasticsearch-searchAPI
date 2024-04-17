@@ -3,6 +3,8 @@ package com.example.searchAPI.service;
 import com.example.searchAPI.config.ElasticConfiguration;
 import com.example.searchAPI.constant.topsearched.TopSearched;
 import com.example.searchAPI.validator.GenericValidator;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.RequestOptions;
@@ -11,6 +13,7 @@ import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.search.aggregations.AggregationBuilders;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -20,22 +23,24 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 public class TopSearchedService {
 
-    @Value("${search.host}")
-    private String host;
+    @Getter
+    @NoArgsConstructor
+    public static class TopSearchedData {
+        String keyword;
+        long count;
 
-    @Value("${search.port}")
-    private int port;
+        TopSearchedData(String keyword, long count) {
+            this.keyword = keyword;
+            this.count = count;
+        }
+    }
 
-    @Value("${search.username}")
-    private String username;
-
-    @Value("${search.protocol}")
-    private String protocol;
+    @Autowired
+    private ElasticConfiguration elasticConfiguration;
 
     @Value("${topsearched.index}")
     private String topSearchedIndex;
@@ -46,8 +51,10 @@ public class TopSearchedService {
     @Value("${topsearched.field.keyword}")
     private String keyword;
 
-    public List<String> topSearched(String period, Integer N) {
-        try (ElasticConfiguration elasticConfiguration = new ElasticConfiguration(host, port, username, protocol)) {
+    private static final String topSearchedBucketName = "top_search_terms";
+
+    public List<TopSearchedData> topSearched(String period, Integer N) {
+        try {
             SearchRequest searchRequest = new SearchRequest(topSearchedIndex);
             SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
             isValidParameter(period);
@@ -56,26 +63,28 @@ public class TopSearchedService {
             setTopSearchedSize(N, searchSourceBuilder, keyword);
             searchRequest.source(searchSourceBuilder);
             SearchResponse response = elasticConfiguration.getElasticClient().search(searchRequest, RequestOptions.DEFAULT);
+            System.out.println(searchRequest.source());
+            Terms terms = response.getAggregations().get(topSearchedBucketName);
+            List<TopSearchedData> topSearchedData = new ArrayList<>();
 
-            Terms terms = response.getAggregations().get("top_search_terms");
-            return terms.getBuckets().stream()
-                    .map(bucket -> bucket.getKeyAsString() + " (" + bucket.getDocCount() + ")")
-                    .collect(Collectors.toList());
+            for (Terms.Bucket bucket : terms.getBuckets()) {
+                topSearchedData.add(new TopSearchedData(bucket.getKeyAsString(), bucket.getDocCount()));
+            }
+
+            return topSearchedData;
         } catch (IOException | IllegalArgumentException e) {
-            List<String> errorMessages = new ArrayList<>();
-            errorMessages.add(e.getMessage());
-            return errorMessages;
+            return null;
         }
     }
 
     private static void setTopSearchedSize(Integer N, SearchSourceBuilder searchSourceBuilder, String keyword) {
         if (N != null) {
             searchSourceBuilder.aggregation(
-                    AggregationBuilders.terms("top_search_terms").field(keyword).size(N)
+                    AggregationBuilders.terms(topSearchedBucketName).field(keyword).size(N)
             );
         } else {
             searchSourceBuilder.aggregation(
-                    AggregationBuilders.terms("top_search_terms").field(keyword)
+                    AggregationBuilders.terms(topSearchedBucketName).field(keyword)
             );
         }
     }
@@ -123,4 +132,6 @@ public class TopSearchedService {
 
         return period.trim().equals(TopSearched.ALL.get());
     }
+
+
 }
